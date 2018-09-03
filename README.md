@@ -7,5 +7,6 @@ Project 1 - Flocking**
 
 ### (TODO: Your README)
 
+[![Flocking GIF](https://i.gyazo.com/3b130bc807c6929aa10d9a8a025fc23c.gif)](https://gyazo.com/3b130bc807c6929aa10d9a8a025fc23c)
 Include screenshots, analysis, etc. (Remember, this is public, so don't put
 anything here that you don't want to share with the world.)
