@@ -354,6 +354,8 @@ __global__ void kernUpdatePos(int N, float dt, glm::vec3 *pos, glm::vec3 *vel) {
 }
 
 // Consider this method of computing a 1D index from a 3D grid index.
+// Since memory is contiguous, it is best to iterate over step by step
+// So for z then y then x is better (since x goes 1 index by 1 index)
 __device__ int gridIndex3Dto1D(int x, int y, int z, int gridResolution) {
 	return x + y * gridResolution + z * gridResolution * gridResolution;
 }
@@ -424,14 +426,15 @@ __device__ void findCellNeighbors(int* outNeighborGrids, glm::vec3 offsetPos, in
 		direction.z = -1;
 	}
 
+	// Neighbors are ordered at a different order (from lowest index to highest index)
 	outNeighborGrids[0] = cellIndex;
 	outNeighborGrids[1] = cellIndex + direction.x;
-	outNeighborGrids[2] = cellIndex + direction.x + direction.y * gridResolution;
-	outNeighborGrids[3] = cellIndex + direction.x + direction.y * gridResolution + direction.z * gridResolution * gridResolution;
-	outNeighborGrids[4] = cellIndex + direction.y * gridResolution;
-	outNeighborGrids[5] = cellIndex + direction.y * gridResolution + direction.z * gridResolution * gridResolution;
-	outNeighborGrids[6] = cellIndex + direction.z * gridResolution * gridResolution;
-	outNeighborGrids[7] = cellIndex + direction.x + direction.z * gridResolution * gridResolution;
+	outNeighborGrids[2] = cellIndex + direction.y * gridResolution;
+	outNeighborGrids[3] = cellIndex + direction.x + direction.y * gridResolution;
+	outNeighborGrids[4] = cellIndex + direction.z * gridResolution * gridResolution;
+	outNeighborGrids[5] = cellIndex + direction.x + direction.z * gridResolution * gridResolution;
+	outNeighborGrids[6] = cellIndex + direction.y * gridResolution + direction.z * gridResolution * gridResolution;
+	outNeighborGrids[7] = cellIndex + direction.x + direction.y * gridResolution + direction.z * gridResolution * gridResolution;
 
 	for (int i = 0; i < 8; i++) {
 		if (outNeighborGrids[i] > cellIndexMax || outNeighborGrids[i] < cellIndexMin) {
@@ -620,18 +623,6 @@ __global__ void kernUpdateVelNeighborSearchCoherent(int N, int gridResolution, g
 	float newSpeed = glm::length(newVel);
 	newVel = newSpeed > maxSpeed ? (newVel / newSpeed) * maxSpeed : newVel;
 	vel2[index] = newVel;
-	// TODO-2.3 - This should be very similar to kernUpdateVelNeighborSearchScattered,
-	// except with one less level of indirection.
-	// This should expect gridCellStartIndices and gridCellEndIndices to refer
-	// directly to pos and vel1.
-	// - Identify the grid cell that this particle is in
-	// - Identify which cells may contain neighbors. This isn't always 8.
-	// - For each cell, read the start/end indices in the boid pointer array.
-	//   DIFFERENCE: For best results, consider what order the cells should be
-	//   checked in to maximize the memory benefits of reordering the boids data.
-	// - Access each boid in the cell and compute velocity change from
-	//   the boids rules, if this boid is within the neighborhood distance.
-	// - Clamp the speed change before putting the new speed in vel2
 }
 
 /**
