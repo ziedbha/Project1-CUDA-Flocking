@@ -6,7 +6,7 @@
 #include "utilityCore.hpp"
 #include "kernel.h"
 
-// LOOK-2.1 potentially useful for doing grid-based neighbor search
+// potentially useful for doing grid-based neighbor search
 #ifndef imax
 #define imax( a, b ) ( ((a) > (b)) ? (a) : (b) )
 #endif
@@ -70,9 +70,6 @@ glm::vec3 *dev_pos;
 glm::vec3 *dev_vel1;
 glm::vec3 *dev_vel2;
 
-// LOOK-2.1 - these are NOT allocated for you. You'll have to set up the thrust
-// pointers on your own too.
-
 // For efficient sorting and the uniform grid. These should always be parallel.
 int *dev_particleArrayIndices; // What index in dev_pos and dev_velX represents this particle?
 int *dev_particleGridIndices; // What grid cell is this particle in?
@@ -86,7 +83,7 @@ int *dev_gridCellEndIndices;   // to this cell?
 // TODO-2.3 - consider what additional buffers you might need to reshuffle
 // the position and velocity data to be coherent within cells.
 
-// LOOK-2.1 - Grid parameters based on simulation parameters.
+// Grid parameters based on simulation parameters.
 // These are automatically computed for you in Boids::initSimulation
 int gridCellCount;
 int gridSideCount;
@@ -168,7 +165,7 @@ void Boids::initSimulation(int N) {
 	gridMinimum.y -= halfGridWidth;
 	gridMinimum.z -= halfGridWidth;
 
-	// TODO-2.1 TODO-2.3 - Allocate additional buffers here.
+	// Allocate additional buffers here.
 	cudaMalloc((void**)&dev_particleArrayIndices, N * sizeof(int));
 	cudaMalloc((void**)&dev_particleGridIndices, N * sizeof(int));
 	cudaMalloc((void**)&dev_gridCellStartIndices, gridCellCount * sizeof(int));
@@ -573,20 +570,6 @@ void Boids::stepSimulationScatteredGrid(float dt) {
 
 	//// Ping-pong the velocity buffers (from vel2 to vel1)
 	cudaMemcpy(dev_vel1, dev_vel2, sizeof(glm::vec3) * numObjects, cudaMemcpyDeviceToDevice);
-
-	// TODO-2.1
-	// Uniform Grid Neighbor search using Thrust sort.
-	// In Parallel:
-	// - label each particle with its array index as well as its grid index.
-	//   Use 2x width grids.
-	// - Unstable key sort using Thrust. A stable sort isn't necessary, but you
-	//   are welcome to do a performance comparison.
-	// - Naively unroll the loop for finding the start and end indices of each
-	//   cell's data pointers in the array of boid indices
-
-	// - Perform velocity updates using neighbor search
-	// - Update positions
-	// - Ping-pong buffers as needed
 }
 
 void Boids::stepSimulationCoherentGrid(float dt) {
@@ -611,6 +594,11 @@ void Boids::endSimulation() {
 	cudaFree(dev_vel1);
 	cudaFree(dev_vel2);
 	cudaFree(dev_pos);
+	
+	cudaFree(dev_particleArrayIndices);
+	cudaFree(dev_particleGridIndices);
+	cudaFree(dev_gridCellStartIndices);
+	cudaFree(dev_gridCellEndIndices);
 
 	// TODO-2.1 TODO-2.3 - Free any additional buffers here.
 }
