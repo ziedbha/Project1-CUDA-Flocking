@@ -37,7 +37,7 @@ void checkCUDAError(const char *msg, int line = -1) {
 *****************/
 
 /*! Block size used for CUDA kernel launch. */
-#define blockSize 128
+#define blockSize 16
 
 // Parameters for the boids algorithm.
 // These worked well in our reference implementation.
@@ -258,10 +258,10 @@ void Boids::copyBoidsToVBO(float *vbodptr_positions, float *vbodptr_velocities) 
 * in the `pos` and `vel` arrays.
 */
 __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *pos, const glm::vec3 *vel) {
-	glm::vec3 alignment(0.0f, 0.0f, 0.0f);
-	glm::vec3 separation(0.0f, 0.0f, 0.0f);
-	glm::vec3 cohesion(0.0f, 0.0f, 0.0f);
-	glm::vec3 deltaVel(0.0f, 0.0f, 0.0f);
+	glm::vec3 alignment(0.0f);
+	glm::vec3 separation(0.0f);
+	glm::vec3 cohesion(0.0f);
+	glm::vec3 deltaVel(0.0f);
 
 	float alignmentCount = 0.0f;
 	float cohesionCount = 0.0f;
@@ -276,7 +276,7 @@ __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *po
 		// Rule 1 - Alignment: boids fly towards their local perceived center of mass, which excludes themselves
 		if (distance < rule1Distance) {
 			cohesion += otherPos;
-			cohesionCount++;
+			++cohesionCount;
 		}
 
 		// Rule 2 - Separation: boids try to stay a distance d away from each other
@@ -287,22 +287,27 @@ __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *po
 		// Rule 3 - Cohesion: boids try to match the speed of surrounding boids
 		if (distance < rule3Distance) {
 			alignment += vel[i];
-			alignmentCount++;
+			++alignmentCount;
 		}
 	}
 
 	// Average out the cohesion velocity and scale it
-	cohesion /= cohesionCount >= 1 ? cohesionCount : 1;
-	cohesion = (cohesion - pos[iSelf]) * rule1Scale;
-	deltaVel += cohesion;
+	if (cohesionCount > 0) {
+		cohesion /= cohesionCount;
+		cohesion = (cohesion - pos[iSelf]) * rule1Scale;
+		deltaVel += cohesion;
+	}
+	
 
 	// Scale the separation velocity
 	separation *= rule2Scale;
 	deltaVel += separation;
 
 	// Average out the cohesion velocity and scale it
-	alignment *= alignmentCount >= 1 ? rule3Scale / alignmentCount : rule3Scale;
-	deltaVel += alignment;
+	if (alignmentCount > 0) {
+		alignment *= rule3Scale / alignmentCount;
+		deltaVel += alignment;
+	}
 
 	return deltaVel;
 }
@@ -320,7 +325,7 @@ __global__ void kernUpdateVelocityBruteForce(int N, glm::vec3 *pos, glm::vec3 *v
 	glm::vec3 deltaVel = computeVelocityChange(N, index, pos, vel1);
 	glm::vec3 newVel = vel1[index] + deltaVel;
 	float newSpeed = glm::length(newVel);
-	newVel = newSpeed > maxSpeed ? (newVel / newSpeed) * maxSpeed : newVel;
+	newVel = newSpeed > maxSpeed ? glm::normalize(newVel) * maxSpeed : newVel;
 
 	// Record the new velocity into vel2. Question: why NOT vel1? Answer: because vel1 always contains
 	// the velocity of the previous frame update. After updating the current frame with the new velocity (vel2)
@@ -468,10 +473,10 @@ __global__ void kernUpdateVelNeighborSearchScattered(int N, int gridResolution, 
 	findCellNeighbors(neighbors, thisPos, gridResolution, gridCell, minCell, maxCell);
 
 	// Compute delta vel
-	glm::vec3 alignment(0.0f, 0.0f, 0.0f);
-	glm::vec3 separation(0.0f, 0.0f, 0.0f);
-	glm::vec3 cohesion(0.0f, 0.0f, 0.0f);
-	glm::vec3 deltaVel(0.0f, 0.0f, 0.0f);
+	glm::vec3 alignment(0.0f);
+	glm::vec3 separation(0.0f);
+	glm::vec3 cohesion(0.0f);
+	glm::vec3 deltaVel(0.0f);
 	int alignmentCount = 0;
 	int cohesionCount = 0;
 
@@ -490,7 +495,7 @@ __global__ void kernUpdateVelNeighborSearchScattered(int N, int gridResolution, 
 						// Rule 1 - Cohesion: boids fly towards their local perceived center of mass, which excludes themselves
 						if (distance < rule1Distance) {
 							cohesion += otherPos;
-							cohesionCount++;
+							++cohesionCount;
 						}
 
 						// Rule 2 - Separation: boids try to stay a distance d away from each other
@@ -501,7 +506,7 @@ __global__ void kernUpdateVelNeighborSearchScattered(int N, int gridResolution, 
 						// Rule 3 - Alignment: boids try to match the speed of surrounding boids
 						if (distance < rule3Distance) {
 							alignment += vel1[particleArrayIndices[j]];
-							alignmentCount++;
+							++alignmentCount;
 						}
 					}
 				}
@@ -510,18 +515,21 @@ __global__ void kernUpdateVelNeighborSearchScattered(int N, int gridResolution, 
 	}
 
 	// Average out the cohesion velocity and scale it
-	cohesion = cohesionCount >= 1 ? cohesion / (float)(cohesionCount) : cohesion;
-	cohesion = (cohesion - pos[particleArrayIndices[index]]) * rule1Scale;
-	deltaVel += cohesion;
+	if (cohesionCount > 0) {
+		cohesion /= cohesionCount;
+		cohesion = (cohesion - pos[particleArrayIndices[index]]) * rule1Scale;
+		deltaVel += cohesion;
+	}
 
 	// Scale the separation velocity
 	separation *= rule2Scale;
 	deltaVel += separation;
 
-	// Average out the alignment velocity and scale it
-	alignment = alignmentCount >= 1 ? alignment / (float)(alignmentCount) : alignment;
-	alignment *= rule3Scale;
-	deltaVel += alignment;
+	// Average out the cohesion velocity and scale it
+	if (alignmentCount > 0) {
+		alignment *= rule3Scale / alignmentCount;
+		deltaVel += alignment;
+	}
 
 	glm::vec3 newVel = vel1[particleArrayIndices[index]] + deltaVel;
 	float newSpeed = glm::length(newVel);
@@ -564,10 +572,10 @@ __global__ void kernUpdateVelNeighborSearchCoherent(int N, int gridResolution, g
 	findCellNeighbors(neighbors, thisPos, gridResolution, gridCell, minCell, maxCell);
 
 	// Compute delta vel
-	glm::vec3 alignment(0.0f, 0.0f, 0.0f);
-	glm::vec3 separation(0.0f, 0.0f, 0.0f);
-	glm::vec3 cohesion(0.0f, 0.0f, 0.0f);
-	glm::vec3 deltaVel(0.0f, 0.0f, 0.0f);
+	glm::vec3 alignment(0.0f);
+	glm::vec3 separation(0.0f);
+	glm::vec3 cohesion(0.0f);
+	glm::vec3 deltaVel(0.0f);
 	int alignmentCount = 0;
 	int cohesionCount = 0;
 
@@ -586,7 +594,7 @@ __global__ void kernUpdateVelNeighborSearchCoherent(int N, int gridResolution, g
 						// Rule 1 - Cohesion: boids fly towards their local perceived center of mass, which excludes themselves
 						if (distance < rule1Distance) {
 							cohesion += otherPos;
-							cohesionCount++;
+							++cohesionCount;
 						}
 
 						// Rule 2 - Separation: boids try to stay a distance d away from each other
@@ -597,7 +605,7 @@ __global__ void kernUpdateVelNeighborSearchCoherent(int N, int gridResolution, g
 						// Rule 3 - Alignment: boids try to match the speed of surrounding boids
 						if (distance < rule3Distance) {
 							alignment += vel1[j];
-							alignmentCount++;
+							++alignmentCount;
 						}
 					}
 				}
@@ -606,18 +614,21 @@ __global__ void kernUpdateVelNeighborSearchCoherent(int N, int gridResolution, g
 	}
 
 	// Average out the cohesion velocity and scale it
-	cohesion = cohesionCount >= 1 ? cohesion / (float)(cohesionCount) : cohesion;
-	cohesion = (cohesion - pos[index]) * rule1Scale;
-	deltaVel += cohesion;
+	if (cohesionCount > 0) {
+		cohesion /= cohesionCount;
+		cohesion = (cohesion - pos[index]) * rule1Scale;
+		deltaVel += cohesion;
+	}
 
 	// Scale the separation velocity
 	separation *= rule2Scale;
 	deltaVel += separation;
 
-	// Average out the alignment velocity and scale it
-	alignment = alignmentCount >= 1 ? alignment / (float)(alignmentCount) : alignment;
-	alignment *= rule3Scale;
-	deltaVel += alignment;
+	// Average out the cohesion velocity and scale it
+	if (alignmentCount > 0) {
+		alignment *= rule3Scale / alignmentCount;
+		deltaVel += alignment;
+	}
 
 	glm::vec3 newVel = vel1[index] + deltaVel;
 	float newSpeed = glm::length(newVel);
@@ -638,7 +649,11 @@ void Boids::stepSimulationNaive(float dt) {
 	kernUpdatePos << <fullBlocksPerGrid, blockSize>> >(numObjects, dt, dev_pos, dev_vel2);
 
 	// Ping-pong the velocity buffers (from vel2 to vel1)
-	cudaMemcpy(dev_vel1, dev_vel2, sizeof(glm::vec3) * numObjects, cudaMemcpyDeviceToDevice);
+	glm::vec3* temp = dev_vel1;
+	dev_vel1 = dev_vel2;
+	dev_vel2 = temp;
+
+	//cudaMemcpy(dev_vel1, dev_vel2, sizeof(glm::vec3) * numObjects, cudaMemcpyDeviceToDevice);
 }
 
 void Boids::stepSimulationScatteredGrid(float dt) {
